@@ -70,6 +70,19 @@ public class FlowerManager : MonoBehaviour
             flowerContainer
         );
 
+        // Set flower ID and tag for identification
+        FlowerData flowerData = flower.GetComponent<FlowerData>();
+        if (flowerData != null)
+        {
+            flowerData.SetFlowerID(selectedFlowerIndex);
+        }
+        
+        // Set tag if not already set
+        if (string.IsNullOrEmpty(flower.tag) || flower.tag == "Untagged")
+        {
+            flower.tag = "Flower";
+        }
+
         spawnedFlowers.Add(flower);
         return flower;
     }
@@ -115,6 +128,117 @@ public class FlowerManager : MonoBehaviour
     public int GetFlowerCount()
     {
         return flowerPrefabs.Count;
+    }
+
+    /// <summary>
+    /// Spawns a flower on the plate at the specified local position
+    /// </summary>
+    /// <param name="plate">The plate Transform to place the flower on</param>
+    /// <param name="localPosition">Local position relative to plate (use Vector3.zero for center)</param>
+    public GameObject SpawnFlowerOnPlate(Transform plate, Vector3 localPosition)
+    {
+        if (plate == null)
+        {
+            Debug.LogError("Cannot spawn flower: Plate is null!");
+            return null;
+        }
+
+        if (selectedFlowerIndex < 0 || selectedFlowerIndex >= flowerPrefabs.Count)
+        {
+            Debug.LogError("No flower selected!");
+            return null;
+        }
+
+        // Convert local position to world position for initial spawn
+        Vector3 worldPosition = plate.TransformPoint(localPosition);
+        Quaternion worldRotation = plate.rotation;
+
+        // Spawn flower
+        GameObject flower = Instantiate(
+            flowerPrefabs[selectedFlowerIndex],
+            worldPosition,
+            worldRotation,
+            flowerContainer
+        );
+
+        spawnedFlowers.Add(flower);
+
+        // Set flower ID and tag for identification
+        FlowerData flowerData = flower.GetComponent<FlowerData>();
+        if (flowerData != null)
+        {
+            flowerData.SetFlowerID(selectedFlowerIndex);
+        }
+        
+        // Set tag if not already set
+        if (string.IsNullOrEmpty(flower.tag) || flower.tag == "Untagged")
+        {
+            flower.tag = "Flower";
+        }
+
+        // Try to place on plate using FlowerPlacement component
+        FlowerPlacement placement = flower.GetComponent<FlowerPlacement>();
+        if (placement != null)
+        {
+            placement.PlaceOnPlate(plate, localPosition);
+        }
+        else
+        {
+            // If no FlowerPlacement component, manually parent to plate
+            flower.transform.SetParent(plate);
+            flower.transform.localPosition = localPosition;
+            flower.transform.localRotation = Quaternion.identity;
+        }
+
+        return flower;
+    }
+
+    /// <summary>
+    /// Gets all flowers of a specific type
+    /// </summary>
+    public List<GameObject> GetFlowersByType(string flowerType)
+    {
+        List<GameObject> flowersOfType = new List<GameObject>();
+        
+        foreach (GameObject flower in spawnedFlowers)
+        {
+            if (flower == null) continue;
+            
+            FlowerData data = flower.GetComponent<FlowerData>();
+            if (data != null && data.GetFlowerType() == flowerType)
+            {
+                flowersOfType.Add(flower);
+            }
+        }
+        
+        return flowersOfType;
+    }
+
+    /// <summary>
+    /// Gets all flowers with a specific tag
+    /// </summary>
+    public List<GameObject> GetFlowersByTag(string tag)
+    {
+        List<GameObject> flowersWithTag = new List<GameObject>();
+        
+        foreach (GameObject flower in spawnedFlowers)
+        {
+            if (flower != null && flower.CompareTag(tag))
+            {
+                flowersWithTag.Add(flower);
+            }
+        }
+        
+        return flowersWithTag;
+    }
+
+    /// <summary>
+    /// Gets flower data for a specific flower
+    /// </summary>
+    public FlowerData GetFlowerData(GameObject flower)
+    {
+        if (flower == null) return null;
+        return flower.GetComponent<FlowerData>();
     }
 }
 

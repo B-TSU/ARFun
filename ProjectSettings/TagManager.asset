@@ -28,6 +28,13 @@ TagManager:
   - QDSUITextInputField
   - SamplesInfoPanel
   - QDSUIToggleCheckboxRadio
+  - Flower
+  - Flower_Roses
+  - Flower_Lilly
+  - Flower_Tullip
+  - Flower_Meadow
+  - Flower_Red_Spider_Lilly
+  - Flower_Carnation
   layers:
   - Default
   - TransparentFX
@@ -35,7 +42,7 @@ TagManager:
   - Overlay UI
   - Water
   - UI
-  - 
+  - Plate
   - 
   - 
   - 
