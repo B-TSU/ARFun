@@ -76,6 +76,12 @@ crashlytics-build.properties
 /[Aa]ssets/[Rr]esources/[Cc]onfig/*.json
 !**/api_config.json.example
 
+# Secrets file (contains API keys - NEVER commit!)
+secrets.json
+/[Aa]ssets/secrets.json
+# But allow the example file
+!secrets.json.example
+
 # macOS
 .DS_Store
 .DS_Store?
