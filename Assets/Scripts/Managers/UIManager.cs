@@ -10,10 +10,7 @@ public class UIManager : MonoBehaviour
 
     [Header("UI Panels")]
     [SerializeField] private GameObject mainMenuPanel;
-    [SerializeField] private GameObject plateSelectionPanel;
-    [SerializeField] private GameObject platePlacementPanel;
     [SerializeField] private GameObject flowerSelectionPanel;
-    [SerializeField] private GameObject trimmingPanel;
 
     private Dictionary<GameState, GameObject> stateToPanelMap;
 
@@ -53,12 +50,12 @@ public class UIManager : MonoBehaviour
         stateToPanelMap = new Dictionary<GameState, GameObject>
         {
             { GameState.MainMenu, mainMenuPanel },
-            { GameState.PlateSelection, plateSelectionPanel },
-            { GameState.PlatePlacement, platePlacementPanel },
-            { GameState.PlateConfirmation, platePlacementPanel }, // Can reuse placement panel
+            { GameState.PlateSelection, null }, // No UI panel
+            { GameState.PlatePlacement, null }, // No UI panel
+            { GameState.PlateConfirmation, null }, // No UI panel
             { GameState.FlowerSelection, flowerSelectionPanel },
             { GameState.FlowerArrangement, null }, // No UI panel needed
-            { GameState.Trimming, trimmingPanel }
+            { GameState.Trimming, null } // No UI panel
         };
     }
 
@@ -88,10 +85,36 @@ public class UIManager : MonoBehaviour
     public void HideAllPanels()
     {
         if (mainMenuPanel != null) mainMenuPanel.SetActive(false);
-        if (plateSelectionPanel != null) plateSelectionPanel.SetActive(false);
-        if (platePlacementPanel != null) platePlacementPanel.SetActive(false);
         if (flowerSelectionPanel != null) flowerSelectionPanel.SetActive(false);
-        if (trimmingPanel != null) trimmingPanel.SetActive(false);
+    }
+
+    /// <summary>
+    /// Shows the current menu panel based on the current game state
+    /// </summary>
+    public void ShowCurrentMenu()
+    {
+        if (GameStateManager.Instance != null)
+        {
+            GameState currentState = GameStateManager.Instance.GetCurrentState();
+            ShowPanelForState(currentState);
+        }
+        else
+        {
+            // Fallback to main menu if GameStateManager is not available
+            ShowMainMenu();
+        }
+    }
+
+    /// <summary>
+    /// Shows the main menu panel
+    /// </summary>
+    private void ShowMainMenu()
+    {
+        HideAllPanels();
+        if (mainMenuPanel != null)
+        {
+            mainMenuPanel.SetActive(true);
+        }
     }
 }
 
