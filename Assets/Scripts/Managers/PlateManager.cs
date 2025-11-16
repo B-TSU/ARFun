@@ -55,14 +55,57 @@ public class PlateManager : MonoBehaviour
             return null;
         }
 
+        return SpawnPlatePrefab(selectedPlateIndex, position, rotation);
+    }
+
+    /// <summary>
+    /// Spawns a specific plate prefab by index at the given position and rotation
+    /// </summary>
+    public GameObject SpawnPlatePrefab(int plateIndex, Vector3 position, Quaternion rotation)
+    {
+        if (plateIndex < 0 || plateIndex >= platePrefabs.Count)
+        {
+            Debug.LogError($"Invalid plate index: {plateIndex}");
+            return null;
+        }
+
+        if (platePrefabs[plateIndex] == null)
+        {
+            Debug.LogError($"Plate prefab at index {plateIndex} is null!");
+            return null;
+        }
+
         // Destroy existing plate if any
         if (currentPlate != null)
         {
             Destroy(currentPlate);
         }
 
-        // Spawn new plate
-        currentPlate = Instantiate(platePrefabs[selectedPlateIndex], position, rotation, plateAnchor);
+        // Spawn new plate from prefab
+        currentPlate = Instantiate(platePrefabs[plateIndex], position, rotation, plateAnchor);
+        
+        return currentPlate;
+    }
+
+    /// <summary>
+    /// Spawns a plate from a specific prefab GameObject
+    /// </summary>
+    public GameObject SpawnPlateFromPrefab(GameObject platePrefab, Vector3 position, Quaternion rotation)
+    {
+        if (platePrefab == null)
+        {
+            Debug.LogError("Plate prefab is null!");
+            return null;
+        }
+
+        // Destroy existing plate if any
+        if (currentPlate != null)
+        {
+            Destroy(currentPlate);
+        }
+
+        // Spawn new plate from prefab
+        currentPlate = Instantiate(platePrefab, position, rotation, plateAnchor);
         
         return currentPlate;
     }
@@ -73,6 +116,14 @@ public class PlateManager : MonoBehaviour
     public GameObject GetCurrentPlate()
     {
         return currentPlate;
+    }
+
+    /// <summary>
+    /// Gets the plate anchor Transform
+    /// </summary>
+    public Transform GetPlateAnchor()
+    {
+        return plateAnchor;
     }
 
     /// <summary>

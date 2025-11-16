@@ -6,9 +6,10 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/IkebanAR.unity
-    guid: a90394709301c0d4bb15ba3d0df832c8
+    path: Assets/Scenes/IkebanAR2.unity
+    guid: 2d3c72ab1a0ff4b41aafbb949c21db72
   m_configObjects:
+    Unity.XR.Oculus.Settings: {fileID: 11400000, guid: 50b0ad43e6afbe947b5676ce7e3b7af2, type: 2}
     UnityEditor.XR.ARCore.ARCoreSettings: {fileID: 11400000, guid: 1fe37f4c114ebd247a0dd679532b1906, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
     com.unity.xr.arfoundation.simulation_settings: {fileID: 11400000, guid: 2a8138f7d42d4034bbb5bc8038025a50, type: 2}
