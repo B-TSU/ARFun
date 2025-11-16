@@ -140,5 +140,22 @@ public class UIManager : MonoBehaviour
             settingsPanel.SetActive(true);
         }
     }
+
+    /// <summary>
+    /// Shows the current menu panel based on the current game state
+    /// </summary>
+    public void ShowCurrentMenu()
+    {
+        if (GameStateManager.Instance != null)
+        {
+            GameState currentState = GameStateManager.Instance.GetCurrentState();
+            ShowPanelForState(currentState);
+        }
+        else
+        {
+            // Fallback to main menu if GameStateManager is not available
+            ShowMainMenu();
+        }
+    }
 }
 
