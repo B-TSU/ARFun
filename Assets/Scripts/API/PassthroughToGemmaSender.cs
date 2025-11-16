@@ -1,53 +1,48 @@
 using UnityEngine;
 using UnityEngine.Networking;
+using System;
 using System.Collections;
 using System.Text;
-using System;
-#if META_XR_SDK_AVAILABLE
-using Meta.XR;
-#endif
 
 /// <summary>
-/// Captures images from passthrough camera and sends them to Google Gemma 3 27B via OpenRouter
+/// Captures passthrough camera image and sends it to OpenRouter API (Gemma 3 27B)
+/// to get tips on how to produce a better bouquet
 /// </summary>
 public class PassthroughToGemmaSender : MonoBehaviour
 {
     public static PassthroughToGemmaSender Instance { get; private set; }
 
-    #region Constants
-    private const string DEFAULT_PROMPT = "Analyze this image and describe what you see.";
-    private const string JSON_CONTENT_TYPE = "application/json";
-    private const string IMAGE_DATA_URI_PREFIX = "data:image/png;base64,";
-    #endregion
-
     #region Serialized Fields
     [Header("OpenRouter API Settings")]
-    [Tooltip("API key is stored securely. Use SetApiKey() method or SecretsManager to set it.")]
-    private string openRouterApiKey;
     [SerializeField] private string modelName = "google/gemma-3-27b-it:free";
     [SerializeField] private string apiUrl = "https://openrouter.ai/api/v1/chat/completions";
 
     [Header("Camera Settings")]
-    [SerializeField] private int captureWidth = 1280;
-    [SerializeField] private int captureHeight = 960;
-#if META_XR_SDK_AVAILABLE
-    [SerializeField] private PassthroughCameraAccess passthroughCameraAccess;
-#else
-    [SerializeField] private MonoBehaviour passthroughCameraAccess; // Placeholder when Meta SDK not available
-#endif
+    [SerializeField] private int captureWidth = 1024;
+    [SerializeField] private int captureHeight = 768;
+    [SerializeField] private Camera passthroughCamera;
+    
+    [Header("Passthrough Camera Access")]
+    [SerializeField] private MonoBehaviour passthroughCameraAccess; // PassthroughCameraAccess component reference
+
+    [Header("Prompt Settings")]
+    [SerializeField] private string promptText = "Please analyze this image of my ikebana bouquet and provide tips on how to produce a better bouquet. Focus on flower arrangement, balance, color harmony, and traditional ikebana principles.";
 
     [Header("Debug")]
     [SerializeField] private bool debugMode = true;
     #endregion
 
     #region Private Fields
-    private Camera arCamera;
+    private RenderTexture captureTexture;
     private bool isCapturing = false;
+    private bool isProcessing = false;
     #endregion
 
     #region Events
     public event Action<string> OnResponseReceived;
-    public event Action<string> OnErrorOccurred;
+    public event Action<string> OnError;
+    public event Action OnCaptureStarted;
+    public event Action OnCaptureCompleted;
     #endregion
 
     #region Unity Lifecycle
@@ -60,6 +55,7 @@ public class PassthroughToGemmaSender : MonoBehaviour
         else
         {
             Destroy(gameObject);
+            return;
         }
     }
 
@@ -67,367 +63,307 @@ public class PassthroughToGemmaSender : MonoBehaviour
     {
         Initialize();
     }
+
+    private void OnDestroy()
+    {
+        CleanupRenderTexture();
+    }
     #endregion
 
     #region Initialization
     private void Initialize()
     {
-        LoadApiKey();
-        FindARCamera();
-        FindPassthroughCameraAccess();
+        FindPassthroughCamera();
+        CreateRenderTexture();
     }
 
-    private void LoadApiKey()
+    private void FindPassthroughCamera()
     {
-        openRouterApiKey = SecretsManager.GetOpenRouterApiKey();
-        
-        if (string.IsNullOrEmpty(openRouterApiKey))
+        if (passthroughCamera != null)
         {
-            Debug.LogWarning("PassthroughToGemmaSender: No API key found! " +
-                "Please set it using PassthroughToGemmaSender.Instance.SetApiKey() or SecretsManager.SetOpenRouterApiKey()");
+            LogDebug("Passthrough camera already assigned");
+            return;
         }
-        else if (debugMode)
-        {
-            Debug.Log("PassthroughToGemmaSender: API key loaded from secure storage");
-        }
-    }
 
-    private void FindARCamera()
-    {
-        // Try to find camera from Camera Rig
+        // Try to find camera from Meta Building Block Camera Rig
         GameObject cameraRig = GameObject.Find("[BuildingBlock] Camera Rig");
         if (cameraRig != null)
         {
-            Transform centerEye = cameraRig.transform.Find("TrackingSpace/CenterEyeAnchor");
-            if (centerEye != null)
+            Transform trackingSpace = cameraRig.transform.Find("TrackingSpace");
+            if (trackingSpace != null)
             {
-                arCamera = centerEye.GetComponent<Camera>();
+                Transform centerEyeAnchor = trackingSpace.Find("CenterEyeAnchor");
+                if (centerEyeAnchor != null)
+                {
+                    passthroughCamera = centerEyeAnchor.GetComponent<Camera>();
+                    if (passthroughCamera != null)
+                    {
+                        LogDebug("Found passthrough camera from Camera Rig");
+                        return;
+                    }
+                }
             }
         }
 
-        // Fallback to main camera
-        if (arCamera == null)
+        // Fallback: Try to find by name
+        GameObject passthroughObj = GameObject.Find("Meta_Passthrough");
+        if (passthroughObj != null)
         {
-            arCamera = Camera.main;
+            passthroughCamera = passthroughObj.GetComponent<Camera>();
+            if (passthroughCamera != null)
+            {
+                LogDebug("Found passthrough camera by name");
+                return;
+            }
         }
 
-        if (arCamera == null)
+        // Fallback: Use main camera
+        passthroughCamera = Camera.main;
+        if (passthroughCamera != null)
         {
-            Debug.LogError("PassthroughToGemmaSender: Could not find AR camera!");
+            LogDebug("Using Main Camera as fallback");
+        }
+        else
+        {
+            Debug.LogError("PassthroughToGemmaSender: Could not find passthrough camera!");
         }
     }
 
-    private void FindPassthroughCameraAccess()
+    private void CreateRenderTexture()
     {
-#if META_XR_SDK_AVAILABLE
-        if (passthroughCameraAccess == null)
+        if (captureTexture != null)
         {
-            passthroughCameraAccess = FindFirstObjectByType<PassthroughCameraAccess>();
-            
-            if (passthroughCameraAccess == null)
-            {
-                Debug.LogWarning("PassthroughToGemmaSender: PassthroughCameraAccess component not found. " +
-                    "Please add it to a GameObject in the scene or assign it in the Inspector.");
-            }
-            else if (debugMode)
-            {
-                Debug.Log("PassthroughToGemmaSender: Found PassthroughCameraAccess component");
-            }
+            return;
         }
-#else
-        if (debugMode)
+
+        captureTexture = new RenderTexture(captureWidth, captureHeight, 24, RenderTextureFormat.ARGB32);
+        captureTexture.Create();
+        LogDebug($"Created render texture: {captureWidth}x{captureHeight}");
+    }
+
+    private void CleanupRenderTexture()
+    {
+        if (captureTexture != null)
         {
-            Debug.LogWarning("PassthroughToGemmaSender: Meta XR SDK not available. PassthroughCameraAccess requires Meta SDK.");
+            captureTexture.Release();
+            Destroy(captureTexture);
+            captureTexture = null;
         }
-#endif
     }
     #endregion
 
     #region Public API
     /// <summary>
-    /// Captures an image from the passthrough camera and sends it to Gemma
+    /// Captures image from passthrough camera and sends to Gemma API
     /// </summary>
-    public void CaptureAndSendToGemma(string prompt = DEFAULT_PROMPT)
+    public void CaptureAndSend()
     {
-        if (isCapturing)
+        if (isCapturing || isProcessing)
         {
-            Debug.LogWarning("PassthroughToGemmaSender: Already capturing, please wait...");
+            LogDebug("Already capturing or processing. Please wait.");
             return;
         }
 
-        if (string.IsNullOrEmpty(openRouterApiKey))
+        if (passthroughCamera == null)
         {
-            Debug.LogError("PassthroughToGemmaSender: API key not set!");
-            OnErrorOccurred?.Invoke("API key not set");
+            Debug.LogError("PassthroughToGemmaSender: Passthrough camera not found!");
+            OnError?.Invoke("Passthrough camera not found");
             return;
         }
 
-        StartCoroutine(CaptureAndSendCoroutine(prompt));
-    }
-
-    /// <summary>
-    /// Enables the passthrough camera access
-    /// </summary>
-    public void StartPassthroughCamera()
-    {
-#if META_XR_SDK_AVAILABLE
-        if (passthroughCameraAccess != null)
+        string apiKey = SecretsManager.GetOpenRouterApiKey();
+        if (string.IsNullOrEmpty(apiKey))
         {
-            passthroughCameraAccess.enabled = true;
-            LogDebug("Passthrough camera access enabled");
+            Debug.LogError("PassthroughToGemmaSender: OpenRouter API key not set! Use SecretsManager.SetOpenRouterApiKey()");
+            OnError?.Invoke("API key not set");
+            return;
         }
-        else
+
+        StartCoroutine(CaptureAndSendCoroutine(apiKey));
+    }
+
+    /// <summary>
+    /// Manually trigger capture and send with custom prompt
+    /// </summary>
+    public void CaptureAndSendWithPrompt(string customPrompt)
+    {
+        if (isCapturing || isProcessing)
         {
-            Debug.LogWarning("PassthroughToGemmaSender: PassthroughCameraAccess component not found");
+            LogDebug("Already capturing or processing. Please wait.");
+            return;
         }
-#else
-        Debug.LogWarning("PassthroughToGemmaSender: Meta XR SDK not available");
-#endif
-    }
 
-    /// <summary>
-    /// Disables the passthrough camera access
-    /// </summary>
-    public void StopPassthroughCamera()
-    {
-#if META_XR_SDK_AVAILABLE
-        if (passthroughCameraAccess != null)
+        if (passthroughCamera == null)
         {
-            passthroughCameraAccess.enabled = false;
-            LogDebug("Passthrough camera access disabled");
+            Debug.LogError("PassthroughToGemmaSender: Passthrough camera not found!");
+            OnError?.Invoke("Passthrough camera not found");
+            return;
         }
-#else
-        Debug.LogWarning("PassthroughToGemmaSender: Meta XR SDK not available");
-#endif
-    }
 
-    /// <summary>
-    /// Sets the OpenRouter API key securely
-    /// </summary>
-    public void SetApiKey(string apiKey)
-    {
-        openRouterApiKey = apiKey;
-        SecretsManager.SetOpenRouterApiKey(apiKey);
-        LogDebug("API key set and saved securely");
-    }
-
-    /// <summary>
-    /// Checks if API key is set
-    /// </summary>
-    public bool HasApiKey()
-    {
-        return !string.IsNullOrEmpty(openRouterApiKey) && 
-               openRouterApiKey != "YOUR_OPENROUTER_API_KEY";
-    }
-
-    /// <summary>
-    /// Gets the current passthrough camera texture (for preview)
-    /// Returns null if PassthroughCameraAccess is not available or permission not granted
-    /// </summary>
-    public Texture GetPassthroughTexture()
-    {
-#if META_XR_SDK_AVAILABLE
-        if (IsPassthroughCameraAvailable())
+        string apiKey = SecretsManager.GetOpenRouterApiKey();
+        if (string.IsNullOrEmpty(apiKey))
         {
-            return passthroughCameraAccess.GetTexture();
+            Debug.LogError("PassthroughToGemmaSender: OpenRouter API key not set!");
+            OnError?.Invoke("API key not set");
+            return;
         }
-#endif
-        return null;
+
+        StartCoroutine(CaptureAndSendCoroutine(apiKey, customPrompt));
     }
     #endregion
 
-    #region Capture Logic
-    private IEnumerator CaptureAndSendCoroutine(string prompt)
+    #region Capture and Send Coroutine
+    private IEnumerator CaptureAndSendCoroutine(string apiKey, string customPrompt = null)
     {
         isCapturing = true;
+        OnCaptureStarted?.Invoke();
+        LogDebug("Starting image capture...");
 
+        // Wait for end of frame to ensure camera has rendered
+        yield return new WaitForEndOfFrame();
+
+        // Capture the camera's current render
+        if (captureTexture == null)
+        {
+            CreateRenderTexture();
+        }
+
+        // Render camera to texture
+        RenderTexture previousActive = RenderTexture.active;
+        RenderTexture previousTarget = passthroughCamera.targetTexture;
+        string base64Image = null;
+        
         try
         {
-            // Capture image
-            Texture2D capturedImage = CaptureImage();
-            if (capturedImage == null)
+            // Set render texture as target
+            passthroughCamera.targetTexture = captureTexture;
+            passthroughCamera.Render();
+            
+            // Set active render texture before reading pixels
+            RenderTexture.active = captureTexture;
+
+            // Read pixels from render texture
+            // Use RGBA32 format for better compatibility with PNG encoding
+            Texture2D texture2D = new Texture2D(captureWidth, captureHeight, TextureFormat.RGBA32, false);
+            texture2D.ReadPixels(new Rect(0, 0, captureWidth, captureHeight), 0, 0);
+            texture2D.Apply();
+
+            LogDebug("Image captured, converting to base64...");
+
+            // Convert to PNG bytes then base64
+            byte[] pngBytes = texture2D.EncodeToPNG();
+            
+            if (pngBytes == null || pngBytes.Length == 0)
             {
-                HandleCaptureError("Failed to capture image");
+                string errorMsg = "Failed to encode texture to PNG - pngBytes is null or empty";
+                Debug.LogError($"PassthroughToGemmaSender: {errorMsg}");
+                OnError?.Invoke(errorMsg);
                 yield break;
             }
 
-            // Convert to base64
-            string base64Image = ConvertTextureToBase64(capturedImage);
-            LogDebug($"Image captured and converted. Size: {capturedImage.width}x{capturedImage.height}");
+            base64Image = Convert.ToBase64String(pngBytes);
+            
+            if (string.IsNullOrEmpty(base64Image))
+            {
+                string errorMsg = "Failed to convert PNG bytes to base64 string";
+                Debug.LogError($"PassthroughToGemmaSender: {errorMsg}");
+                OnError?.Invoke(errorMsg);
+                yield break;
+            }
+            
+            // Cleanup texture
+            Destroy(texture2D);
 
-            // Send to OpenRouter
-            yield return StartCoroutine(SendToOpenRouter(base64Image, prompt));
-
-            // Cleanup
-            Destroy(capturedImage);
+            isCapturing = false;
+            OnCaptureCompleted?.Invoke();
+            LogDebug($"Image converted to base64 successfully ({base64Image.Length} characters, {pngBytes.Length} bytes)");
+        }
+        catch (Exception e)
+        {
+            string errorMsg = $"Error during image capture/encoding: {e.Message}";
+            Debug.LogError($"PassthroughToGemmaSender: {errorMsg}");
+            Debug.LogException(e);
+            OnError?.Invoke(errorMsg);
+            yield break;
         }
         finally
         {
-            isCapturing = false;
+            // Always restore camera settings
+            RenderTexture.active = previousActive;
+            passthroughCamera.targetTexture = previousTarget;
+            // Reset capturing flag if not already reset
+            if (isCapturing && string.IsNullOrEmpty(base64Image))
+            {
+                isCapturing = false;
+            }
         }
-    }
 
-    private Texture2D CaptureImage()
-    {
-#if META_XR_SDK_AVAILABLE
-        if (IsPassthroughCameraAvailable())
+        // Send to API if base64 conversion was successful
+        if (!string.IsNullOrEmpty(base64Image))
         {
-            return CaptureFromPassthroughCamera();
+            isProcessing = true;
+            string prompt = customPrompt ?? promptText;
+            yield return StartCoroutine(SendToOpenRouterAPI(apiKey, base64Image, prompt));
+            isProcessing = false;
         }
-#endif
-        
-        if (arCamera != null)
-        {
-            return CaptureFromCamera();
-        }
-
-        Debug.LogError("PassthroughToGemmaSender: No camera available for capture!");
-        return null;
-    }
-
-    private Texture2D CaptureFromPassthroughCamera()
-    {
-#if META_XR_SDK_AVAILABLE
-        if (!IsPassthroughCameraAvailable())
-        {
-            Debug.LogError("PassthroughToGemmaSender: PassthroughCameraAccess is not available or not enabled");
-            return null;
-        }
-
-        Texture sourceTexture = passthroughCameraAccess.GetTexture();
-        
-        if (sourceTexture == null)
-        {
-            Debug.LogWarning("PassthroughToGemmaSender: PassthroughCameraAccess.GetTexture() returned null. " +
-                "Make sure 'horizonos.permission.HEADSET_CAMERA' permission has been granted.");
-            return null;
-        }
-
-        return ConvertTextureToTexture2D(sourceTexture);
-#else
-        return null;
-#endif
-    }
-
-    private Texture2D CaptureFromCamera()
-    {
-        if (arCamera == null)
-        {
-            return null;
-        }
-
-        RenderTexture renderTexture = new RenderTexture(captureWidth, captureHeight, 24);
-        arCamera.targetTexture = renderTexture;
-        Texture2D screenshot = new Texture2D(captureWidth, captureHeight, TextureFormat.RGB24, false);
-
-        arCamera.Render();
-        RenderTexture.active = renderTexture;
-        screenshot.ReadPixels(new Rect(0, 0, captureWidth, captureHeight), 0, 0);
-        screenshot.Apply();
-
-        arCamera.targetTexture = null;
-        RenderTexture.active = null;
-        Destroy(renderTexture);
-
-        return screenshot;
-    }
-
-    private Texture2D ConvertTextureToTexture2D(Texture sourceTexture)
-    {
-        if (sourceTexture == null)
-        {
-            return null;
-        }
-
-        // Handle RenderTexture
-        if (sourceTexture is RenderTexture renderTexture)
-        {
-            return ReadFromRenderTexture(renderTexture);
-        }
-
-        // Handle Texture2D
-        if (sourceTexture is Texture2D texture2D)
-        {
-            return CopyTexture2D(texture2D);
-        }
-
-        // Handle other texture types by blitting to RenderTexture
-        return ConvertViaBlit(sourceTexture);
-    }
-
-    private Texture2D ReadFromRenderTexture(RenderTexture renderTexture)
-    {
-        RenderTexture.active = renderTexture;
-        Texture2D texture = new Texture2D(renderTexture.width, renderTexture.height, TextureFormat.RGB24, false);
-        texture.ReadPixels(new Rect(0, 0, renderTexture.width, renderTexture.height), 0, 0);
-        texture.Apply();
-        RenderTexture.active = null;
-        return texture;
-    }
-
-    private Texture2D CopyTexture2D(Texture2D source)
-    {
-        Texture2D texture = new Texture2D(source.width, source.height, TextureFormat.RGB24, false);
-        texture.SetPixels(source.GetPixels());
-        texture.Apply();
-        return texture;
-    }
-
-    private Texture2D ConvertViaBlit(Texture sourceTexture)
-    {
-        RenderTexture tempRT = RenderTexture.GetTemporary(captureWidth, captureHeight, 0, RenderTextureFormat.ARGB32);
-        Graphics.Blit(sourceTexture, tempRT);
-        RenderTexture.active = tempRT;
-        Texture2D texture = new Texture2D(captureWidth, captureHeight, TextureFormat.RGB24, false);
-        texture.ReadPixels(new Rect(0, 0, captureWidth, captureHeight), 0, 0);
-        texture.Apply();
-        RenderTexture.active = null;
-        RenderTexture.ReleaseTemporary(tempRT);
-        return texture;
     }
     #endregion
 
     #region API Communication
-    private IEnumerator SendToOpenRouter(string base64Image, string prompt)
+    private IEnumerator SendToOpenRouterAPI(string apiKey, string base64Image, string prompt)
     {
-        string jsonPayload = BuildJsonPayload(base64Image, prompt);
-        LogDebug("Sending request to OpenRouter...");
+        LogDebug("Sending request to OpenRouter API...");
 
-        using (UnityWebRequest request = CreateWebRequest(jsonPayload))
+        // Build JSON payload
+        string jsonPayload = BuildJsonPayload(base64Image, prompt);
+
+        // Create UnityWebRequest
+        using (UnityWebRequest request = new UnityWebRequest(apiUrl, "POST"))
         {
+            byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
+            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.SetRequestHeader("Authorization", $"Bearer {apiKey}");
+            request.SetRequestHeader("HTTP-Referer", "https://unity-app.com");
+            request.SetRequestHeader("X-Title", "Ikebana AR App");
+
+            // Send request
             yield return request.SendWebRequest();
 
             if (request.result == UnityWebRequest.Result.Success)
             {
-                HandleApiSuccess(request.downloadHandler.text);
+                string responseBody = request.downloadHandler.text;
+                LogDebug("API response received");
+                
+                string responseText = ExtractContentFromResponse(responseBody);
+                if (!string.IsNullOrEmpty(responseText))
+                {
+                    LogDebug($"Response extracted: {responseText.Substring(0, Mathf.Min(100, responseText.Length))}...");
+                    OnResponseReceived?.Invoke(responseText);
+                }
+                else
+                {
+                    string errorMsg = "Failed to extract content from API response";
+                    Debug.LogError($"PassthroughToGemmaSender: {errorMsg}");
+                    LogDebug($"Full response: {responseBody}");
+                    OnError?.Invoke(errorMsg);
+                }
             }
             else
             {
-                HandleApiError(request.error, request.downloadHandler.text);
+                string errorMsg = $"API Error: {request.error} - {request.downloadHandler.text}";
+                Debug.LogError($"PassthroughToGemmaSender: {errorMsg}");
+                OnError?.Invoke(errorMsg);
             }
         }
-    }
-
-    private UnityWebRequest CreateWebRequest(string jsonPayload)
-    {
-        UnityWebRequest request = new UnityWebRequest(apiUrl, "POST");
-        byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
-        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
-        request.downloadHandler = new DownloadHandlerBuffer();
-        
-        request.SetRequestHeader("Content-Type", JSON_CONTENT_TYPE);
-        request.SetRequestHeader("Authorization", $"Bearer {openRouterApiKey}");
-        request.SetRequestHeader("HTTP-Referer", Application.absoluteURL);
-        request.SetRequestHeader("X-Title", Application.productName);
-        
-        return request;
     }
 
     private string BuildJsonPayload(string base64Image, string prompt)
     {
         string escapedPrompt = EscapeJsonString(prompt);
-        string imageUrl = IMAGE_DATA_URI_PREFIX + base64Image;
-        
+        string imageUrl = $"data:image/png;base64,{base64Image}";
+
         return $@"{{
             ""model"": ""{modelName}"",
             ""messages"": [
@@ -450,95 +386,144 @@ public class PassthroughToGemmaSender : MonoBehaviour
         }}";
     }
 
-    private void HandleApiSuccess(string responseText)
+    private string EscapeJsonString(string input)
     {
-        LogDebug($"Response received: {responseText}");
-        ParseOpenRouterResponse(responseText);
-    }
+        if (string.IsNullOrEmpty(input))
+            return input;
 
-    private void HandleApiError(string error, string responseBody)
-    {
-        string errorMessage = $"Error: {error} - {responseBody}";
-        Debug.LogError($"PassthroughToGemmaSender: {errorMessage}");
-        OnErrorOccurred?.Invoke(errorMessage);
-    }
-
-    private void HandleCaptureError(string message)
-    {
-        Debug.LogError($"PassthroughToGemmaSender: {message}");
-        OnErrorOccurred?.Invoke(message);
-    }
-    #endregion
-
-    #region Response Parsing
-    private void ParseOpenRouterResponse(string jsonResponse)
-    {
-        try
-        {
-            string content = ExtractContentFromResponse(jsonResponse);
-            
-            if (!string.IsNullOrEmpty(content))
-            {
-                LogDebug($"Gemma response: {content}");
-                OnResponseReceived?.Invoke(content);
-            }
-            else
-            {
-                // Fallback: return full response
-                OnResponseReceived?.Invoke(jsonResponse);
-            }
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"PassthroughToGemmaSender: Error parsing response: {e.Message}");
-            OnErrorOccurred?.Invoke($"Parse error: {e.Message}");
-        }
+        return input.Replace("\\", "\\\\")
+                    .Replace("\"", "\\\"")
+                    .Replace("\n", "\\n")
+                    .Replace("\r", "\\r")
+                    .Replace("\t", "\\t");
     }
 
     private string ExtractContentFromResponse(string jsonResponse)
     {
-        const string contentMarker = "\"content\":\"";
-        int contentStart = jsonResponse.IndexOf(contentMarker);
-        
-        if (contentStart < 0)
-        {
+        if (string.IsNullOrEmpty(jsonResponse))
             return null;
+
+        try
+        {
+            // Look for "content" field in choices[0].message.content
+            // Try to find the content value with proper JSON string handling
+            const string contentMarker = "\"content\":\"";
+            int contentStart = jsonResponse.IndexOf(contentMarker);
+            
+            if (contentStart < 0)
+            {
+                // Try alternative format without quotes (null content)
+                const string contentMarkerAlt = "\"content\":null";
+                if (jsonResponse.Contains(contentMarkerAlt))
+                {
+                    return null;
+                }
+                return null;
+            }
+
+            contentStart += contentMarker.Length;
+            int contentEnd = FindStringEnd(jsonResponse, contentStart);
+            
+            if (contentEnd > contentStart)
+            {
+                string content = jsonResponse.Substring(contentStart, contentEnd - contentStart);
+                return UnescapeJsonString(content);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"PassthroughToGemmaSender: Error parsing JSON response: {e.Message}");
         }
 
-        contentStart += contentMarker.Length;
-        int contentEnd = jsonResponse.IndexOf("\"", contentStart);
-        
-        if (contentEnd <= contentStart)
-        {
-            return null;
-        }
-
-        string content = jsonResponse.Substring(contentStart, contentEnd - contentStart);
-        return UnescapeJsonString(content);
+        return null;
     }
 
-    private string UnescapeJsonString(string input)
+    private int FindStringEnd(string json, int startIndex)
     {
-        return input.Replace("\\n", "\n")
-                    .Replace("\\\"", "\"")
-                    .Replace("\\\\", "\\");
+        bool escaped = false;
+        for (int i = startIndex; i < json.Length; i++)
+        {
+            char c = json[i];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+            if (c == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+            if (c == '"')
+            {
+                return i;
+            }
+        }
+        return json.Length;
+    }
+
+    private string UnescapeJsonString(string escaped)
+    {
+        if (string.IsNullOrEmpty(escaped))
+            return escaped;
+
+        StringBuilder sb = new StringBuilder(escaped.Length);
+        bool escapedChar = false;
+        
+        for (int i = 0; i < escaped.Length; i++)
+        {
+            char c = escaped[i];
+            
+            if (escapedChar)
+            {
+                switch (c)
+                {
+                    case '"': sb.Append('"'); break;
+                    case '\\': sb.Append('\\'); break;
+                    case 'n': sb.Append('\n'); break;
+                    case 'r': sb.Append('\r'); break;
+                    case 't': sb.Append('\t'); break;
+                    case 'u': // Unicode escape sequence
+                        if (i + 4 < escaped.Length)
+                        {
+                            string hex = escaped.Substring(i + 1, 4);
+                            try
+                            {
+                                int unicode = Convert.ToInt32(hex, 16);
+                                sb.Append((char)unicode);
+                                i += 4;
+                            }
+                            catch
+                            {
+                                sb.Append('\\').Append('u');
+                            }
+                        }
+                        else
+                        {
+                            sb.Append('\\').Append('u');
+                        }
+                        break;
+                    default:
+                        sb.Append('\\').Append(c);
+                        break;
+                }
+                escapedChar = false;
+            }
+            else if (c == '\\')
+            {
+                escapedChar = true;
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+        
+        return sb.ToString();
     }
     #endregion
 
     #region Utility Methods
-    private string ConvertTextureToBase64(Texture2D texture)
-    {
-        byte[] imageBytes = texture.EncodeToPNG();
-        return Convert.ToBase64String(imageBytes);
-    }
-
-    private string EscapeJsonString(string input)
-    {
-        return input.Replace("\\", "\\\\")
-                    .Replace("\"", "\\\"")
-                    .Replace("\n", "\\n");
-    }
-
     private void LogDebug(string message)
     {
         if (debugMode)
@@ -547,11 +532,24 @@ public class PassthroughToGemmaSender : MonoBehaviour
         }
     }
 
-#if META_XR_SDK_AVAILABLE
-    private bool IsPassthroughCameraAvailable()
+    /// <summary>
+    /// Checks if the component is ready to capture
+    /// </summary>
+    public bool IsReady()
     {
-        return passthroughCameraAccess != null && passthroughCameraAccess.enabled;
+        return passthroughCamera != null && 
+               !string.IsNullOrEmpty(SecretsManager.GetOpenRouterApiKey()) &&
+               !isCapturing && 
+               !isProcessing;
     }
-#endif
+
+    /// <summary>
+    /// Gets the current passthrough camera
+    /// </summary>
+    public Camera GetPassthroughCamera()
+    {
+        return passthroughCamera;
+    }
     #endregion
 }
+

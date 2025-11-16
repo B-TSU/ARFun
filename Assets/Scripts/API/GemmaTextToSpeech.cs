@@ -30,6 +30,8 @@ public class GemmaTextToSpeech : MonoBehaviour
 
     #region Private Fields
     private bool isInitialized = false;
+    private int subscriptionRetryCount = 0;
+    private const int MAX_SUBSCRIPTION_RETRIES = 10;
     #endregion
 
     #region Events
@@ -101,6 +103,7 @@ public class GemmaTextToSpeech : MonoBehaviour
         if (PassthroughToGemmaSender.Instance != null)
         {
             PassthroughToGemmaSender.Instance.OnResponseReceived += OnGemmaResponseReceived;
+            subscriptionRetryCount = 0; // Reset retry count on success
             if (debugMode)
             {
                 Debug.Log("GemmaTextToSpeech: Subscribed to PassthroughToGemmaSender events");
@@ -108,9 +111,30 @@ public class GemmaTextToSpeech : MonoBehaviour
         }
         else
         {
-            Debug.LogWarning("GemmaTextToSpeech: PassthroughToGemmaSender.Instance not found. " +
-                "TTS will not work until PassthroughToGemmaSender is initialized.");
+            // Retry subscription if PassthroughToGemmaSender hasn't initialized yet
+            if (subscriptionRetryCount < MAX_SUBSCRIPTION_RETRIES)
+            {
+                subscriptionRetryCount++;
+                if (debugMode)
+                {
+                    Debug.LogWarning($"GemmaTextToSpeech: PassthroughToGemmaSender.Instance not found. " +
+                        $"Retrying subscription ({subscriptionRetryCount}/{MAX_SUBSCRIPTION_RETRIES})...");
+                }
+                // Retry in next frame
+                StartCoroutine(RetrySubscriptionCoroutine());
+            }
+            else
+            {
+                Debug.LogError("GemmaTextToSpeech: PassthroughToGemmaSender.Instance not found after multiple retries. " +
+                    "TTS will not work until PassthroughToGemmaSender is initialized.");
+            }
         }
+    }
+
+    private System.Collections.IEnumerator RetrySubscriptionCoroutine()
+    {
+        yield return null; // Wait one frame
+        SubscribeToGemmaEvents(); // Retry subscription
     }
 
 #if META_VOICE_SDK_AVAILABLE
@@ -171,10 +195,24 @@ public class GemmaTextToSpeech : MonoBehaviour
             return;
         }
 
+        // Safety check: Ensure component is active
+        if (!isActiveAndEnabled)
+        {
+            Debug.LogWarning("GemmaTextToSpeech: Component is not active. Cannot speak.");
+            return;
+        }
+
 #if META_VOICE_SDK_AVAILABLE
         if (ttsSpeaker == null)
         {
             Debug.LogError("GemmaTextToSpeech: TTSSpeaker not available. Cannot speak text.");
+            return;
+        }
+
+        // Safety check: Ensure TTS speaker GameObject is still valid
+        if (ttsSpeaker.gameObject == null)
+        {
+            Debug.LogError("GemmaTextToSpeech: TTSSpeaker GameObject is destroyed. Cannot speak text.");
             return;
         }
 
@@ -277,20 +315,44 @@ public class GemmaTextToSpeech : MonoBehaviour
     #endregion
 
     #region Cleanup
+    private void OnDisable()
+    {
+        // Unsubscribe when disabled to prevent crashes
+        UnsubscribeFromEvents();
+    }
+
     private void OnDestroy()
     {
         // Unsubscribe from events
+        UnsubscribeFromEvents();
+    }
+
+    private void UnsubscribeFromEvents()
+    {
+        // Unsubscribe from PassthroughToGemmaSender events
         if (PassthroughToGemmaSender.Instance != null)
         {
             PassthroughToGemmaSender.Instance.OnResponseReceived -= OnGemmaResponseReceived;
         }
 
 #if META_VOICE_SDK_AVAILABLE
+        // Unsubscribe from TTS events
         if (ttsSpeaker != null)
         {
-            ttsSpeaker.Events.OnPlaybackStart.RemoveListener(OnTTSSpeechStarted);
-            ttsSpeaker.Events.OnPlaybackComplete.RemoveListener(OnTTSSpeechCompleted);
-            ttsSpeaker.Events.OnPlaybackCancelled.RemoveListener(OnTTSSpeechCancelled);
+            try
+            {
+                ttsSpeaker.Events.OnPlaybackStart.RemoveListener(OnTTSSpeechStarted);
+                ttsSpeaker.Events.OnPlaybackComplete.RemoveListener(OnTTSSpeechCompleted);
+                ttsSpeaker.Events.OnPlaybackCancelled.RemoveListener(OnTTSSpeechCancelled);
+            }
+            catch (Exception e)
+            {
+                // Silently handle if events are already removed or object is destroyed
+                if (debugMode)
+                {
+                    Debug.LogWarning($"GemmaTextToSpeech: Error unsubscribing from TTS events: {e.Message}");
+                }
+            }
         }
 #endif
     }

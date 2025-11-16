@@ -25,9 +25,31 @@ public static class SecretsManager
     {
         if (isInitialized) return;
         
-        InitializeSecretsPath();
-        LoadSecrets();
-        isInitialized = true;
+        // Safety check: Don't initialize file I/O in edit mode unless explicitly needed
+        // This prevents crashes when scripts are attached in the editor
+        #if UNITY_EDITOR
+        if (!Application.isPlaying)
+        {
+            // In edit mode, just create empty secrets data without file I/O
+            secretsData = new SecretsData();
+            isInitialized = true;
+            return;
+        }
+        #endif
+        
+        try
+        {
+            InitializeSecretsPath();
+            LoadSecrets();
+            isInitialized = true;
+        }
+        catch (Exception e)
+        {
+            // If initialization fails, create empty secrets to prevent crashes
+            Debug.LogWarning($"SecretsManager: Initialization failed, using empty secrets. Error: {e.Message}");
+            secretsData = new SecretsData();
+            isInitialized = true;
+        }
     }
 
     /// <summary>
@@ -35,18 +57,39 @@ public static class SecretsManager
     /// </summary>
     private static void InitializeSecretsPath()
     {
-        // Store in persistent data path (outside of Assets folder)
-        string persistentPath = Application.persistentDataPath;
-        secretsFilePath = Path.Combine(persistentPath, "secrets.json");
-
-        // For editor, also check for a local secrets file in Assets (gitignored)
-        #if UNITY_EDITOR
-        string editorSecretsPath = Path.Combine(Application.dataPath, "..", "secrets.json");
-        if (File.Exists(editorSecretsPath))
+        try
         {
-            secretsFilePath = editorSecretsPath;
+            // Store in persistent data path (outside of Assets folder)
+            // Only access persistentDataPath in play mode to avoid editor-time issues
+            string persistentPath = Application.isPlaying ? Application.persistentDataPath : "";
+            
+            if (!string.IsNullOrEmpty(persistentPath))
+            {
+                secretsFilePath = Path.Combine(persistentPath, "secrets.json");
+            }
+
+            // For editor, also check for a local secrets file in Assets (gitignored)
+            #if UNITY_EDITOR
+            try
+            {
+                string editorSecretsPath = Path.Combine(Application.dataPath, "..", "secrets.json");
+                if (File.Exists(editorSecretsPath))
+                {
+                    secretsFilePath = editorSecretsPath;
+                }
+            }
+            catch (Exception e)
+            {
+                // Silently handle file system errors in editor
+                Debug.LogWarning($"SecretsManager: Could not check editor secrets path: {e.Message}");
+            }
+            #endif
         }
-        #endif
+        catch (Exception e)
+        {
+            Debug.LogWarning($"SecretsManager: Error initializing secrets path: {e.Message}");
+            secretsFilePath = "";
+        }
     }
 
     /// <summary>
@@ -60,9 +103,27 @@ public static class SecretsManager
             return;
         }
         
+        // Safety check: Don't do file I/O in edit mode unless in play mode
+        #if UNITY_EDITOR
+        if (!Application.isPlaying)
+        {
+            if (secretsData == null)
+            {
+                secretsData = new SecretsData();
+            }
+            return;
+        }
+        #endif
+        
         if (string.IsNullOrEmpty(secretsFilePath))
         {
             InitializeSecretsPath();
+        }
+
+        if (string.IsNullOrEmpty(secretsFilePath))
+        {
+            secretsData = new SecretsData();
+            return;
         }
 
         if (File.Exists(secretsFilePath))
@@ -70,12 +131,23 @@ public static class SecretsManager
             try
             {
                 string json = File.ReadAllText(secretsFilePath);
-                secretsData = JsonUtility.FromJson<SecretsData>(json);
-                Debug.Log("SecretsManager: Secrets loaded successfully");
+                if (!string.IsNullOrEmpty(json))
+                {
+                    secretsData = JsonUtility.FromJson<SecretsData>(json);
+                    if (secretsData == null)
+                    {
+                        secretsData = new SecretsData();
+                    }
+                    Debug.Log("SecretsManager: Secrets loaded successfully");
+                }
+                else
+                {
+                    secretsData = new SecretsData();
+                }
             }
             catch (Exception e)
             {
-                Debug.LogError($"SecretsManager: Error loading secrets: {e.Message}");
+                Debug.LogWarning($"SecretsManager: Error loading secrets: {e.Message}");
                 secretsData = new SecretsData();
             }
         }
@@ -83,7 +155,12 @@ public static class SecretsManager
         {
             // Create default empty secrets
             secretsData = new SecretsData();
-            Debug.LogWarning("SecretsManager: No secrets file found. Please set your API key using SetOpenRouterApiKey()");
+            #if UNITY_EDITOR
+            if (Application.isPlaying)
+            {
+                Debug.LogWarning("SecretsManager: No secrets file found. Please set your API key using SetOpenRouterApiKey()");
+            }
+            #endif
         }
     }
 
@@ -154,32 +231,60 @@ public static class SecretsManager
 
     /// <summary>
     /// Gets the OpenRouter API key
+    /// Safe to call in edit mode - will return null or environment variable value
     /// </summary>
     public static string GetOpenRouterApiKey()
     {
-        if (!isInitialized)
+        try
         {
-            Initialize();
-        }
-        
-        if (secretsData == null)
-        {
-            LoadSecrets();
-        }
+            if (!isInitialized)
+            {
+                Initialize();
+            }
+            
+            if (secretsData == null)
+            {
+                LoadSecrets();
+            }
 
-        if (secretsData != null && !string.IsNullOrEmpty(secretsData.openRouterApiKey))
-        {
-            return secretsData.openRouterApiKey;
-        }
+            if (secretsData != null && !string.IsNullOrEmpty(secretsData.openRouterApiKey))
+            {
+                return secretsData.openRouterApiKey;
+            }
 
-        // Fallback: Check environment variable
-        string envKey = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
-        if (!string.IsNullOrEmpty(envKey))
-        {
-            return envKey;
-        }
+            // Fallback: Check environment variable (safe in edit mode)
+            try
+            {
+                string envKey = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
+                if (!string.IsNullOrEmpty(envKey))
+                {
+                    return envKey;
+                }
+            }
+            catch (Exception e)
+            {
+                // Silently handle environment variable access errors
+                #if UNITY_EDITOR
+                if (Application.isPlaying)
+                {
+                    Debug.LogWarning($"SecretsManager: Error reading environment variable: {e.Message}");
+                }
+                #endif
+            }
 
-        return null;
+            return null;
+        }
+        catch (Exception e)
+        {
+            // Prevent crashes - return null if anything goes wrong
+            #if UNITY_EDITOR
+            if (Application.isPlaying)
+            {
+                Debug.LogWarning($"SecretsManager: Error getting API key: {e.Message}");
+            }
+            #endif
+            return null;
+        }
     }
 
     /// <summary>
@@ -218,14 +323,28 @@ public static class SecretsManager
 
     /// <summary>
     /// Gets the path to the secrets file (for reference)
+    /// Safe to call in edit mode
     /// </summary>
     public static string GetSecretsFilePath()
     {
-        if (string.IsNullOrEmpty(secretsFilePath))
+        try
         {
-            InitializeSecretsPath();
+            if (string.IsNullOrEmpty(secretsFilePath))
+            {
+                InitializeSecretsPath();
+            }
+            return secretsFilePath ?? "";
         }
-        return secretsFilePath;
+        catch (Exception e)
+        {
+            #if UNITY_EDITOR
+            if (Application.isPlaying)
+            {
+                Debug.LogWarning($"SecretsManager: Error getting secrets file path: {e.Message}");
+            }
+            #endif
+            return "";
+        }
     }
 }
 

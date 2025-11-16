@@ -1392,6 +1392,60 @@ Transform:
   - {fileID: 157864836}
   m_Father: {fileID: 1431869873}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &550749344
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 550749346}
+  - component: {fileID: 550749345}
+  m_Layer: 0
+  m_Name: GameObject
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &550749345
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 550749344}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3a60e2c70b9ab4683af8053541702a38, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  modelName: google/gemma-3-27b-it:free
+  apiUrl: https://openrouter.ai/api/v1/chat/completions
+  captureWidth: 1024
+  captureHeight: 768
+  passthroughCamera: {fileID: 0}
+  passthroughCameraAccess: {fileID: 0}
+  promptText: Please analyze this image of my ikebana bouquet and provide tips on
+    how to produce a better bouquet. Focus on flower arrangement, balance, color
+    harmony, and traditional ikebana principles.
+  debugMode: 1
+--- !u!4 &550749346
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 550749344}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.36060452, y: 0.0746943, z: -0.41289046}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &555519122
 GameObject:
   m_ObjectHideFlags: 0
@@ -1433,7 +1487,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 584941822}
-  - component: {fileID: 584941825}
   - component: {fileID: 584941824}
   - component: {fileID: 584941823}
   m_Layer: 0
@@ -1500,24 +1553,6 @@ MonoBehaviour:
   RequestedResolution: {x: 1280, y: 960}
   TargetMaterial: {fileID: 0}
   _texturePropertyName: 
---- !u!114 &584941825
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 584941821}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3a60e2c70b9ab4683af8053541702a38, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  modelName: google/gemma-3-27b-it:free
-  apiUrl: https://openrouter.ai/api/v1/chat/completions
-  captureWidth: 1280
-  captureHeight: 960
-  passthroughCameraAccess: {fileID: 584941824}
-  debugMode: 1
 --- !u!1 &683524064
 GameObject:
   m_ObjectHideFlags: 0
@@ -4259,3 +4294,4 @@ SceneRoots:
   - {fileID: 3388530230187061536}
   - {fileID: 1643529597174767575}
   - {fileID: 856997509}
+  - {fileID: 550749346}
