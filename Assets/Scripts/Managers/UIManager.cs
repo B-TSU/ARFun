@@ -14,6 +14,7 @@ public class UIManager : MonoBehaviour
     [SerializeField] private GameObject platePlacementPanel;
     [SerializeField] private GameObject flowerSelectionPanel;
     [SerializeField] private GameObject trimmingPanel;
+    [SerializeField] private GameObject settingsPanel;
 
     private Dictionary<GameState, GameObject> stateToPanelMap;
 
@@ -38,6 +39,9 @@ public class UIManager : MonoBehaviour
         {
             GameStateManager.Instance.OnStateChanged += HandleStateChanged;
         }
+        
+        // Start with main menu panel visible
+        ShowMainMenu();
     }
 
     private void OnDestroy()
@@ -92,6 +96,49 @@ public class UIManager : MonoBehaviour
         if (platePlacementPanel != null) platePlacementPanel.SetActive(false);
         if (flowerSelectionPanel != null) flowerSelectionPanel.SetActive(false);
         if (trimmingPanel != null) trimmingPanel.SetActive(false);
+        if (settingsPanel != null) settingsPanel.SetActive(false);
+    }
+
+    /// <summary>
+    /// Shows the main menu panel
+    /// </summary>
+    public void ShowMainMenu()
+    {
+        HideAllPanels();
+        if (mainMenuPanel != null)
+        {
+            mainMenuPanel.SetActive(true);
+        }
+    }
+
+    /// <summary>
+    /// Called when the Play button is clicked - switches to flower selection panel
+    /// </summary>
+    public void OnPlayButtonClicked()
+    {
+        HideAllPanels();
+        if (flowerSelectionPanel != null)
+        {
+            flowerSelectionPanel.SetActive(true);
+        }
+        
+        // Update game state to FlowerSelection
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.ChangeState(GameState.FlowerSelection);
+        }
+    }
+
+    /// <summary>
+    /// Called when the Settings button is clicked - switches to settings panel
+    /// </summary>
+    public void OnSettingsButtonClicked()
+    {
+        HideAllPanels();
+        if (settingsPanel != null)
+        {
+            settingsPanel.SetActive(true);
+        }
     }
 }
 
